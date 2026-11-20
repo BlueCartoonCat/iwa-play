@@ -1,0 +1,14 @@
+{
+  "private": true,
+  "scripts": {
+    "start": "node scripts/devserver.js",
+    "bundle": "node scripts/build-bundle.js"
+  },
+  "devDependencies": {
+    "wbn": "0.0.10",
+    "wbn-sign": "0.3.3"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}

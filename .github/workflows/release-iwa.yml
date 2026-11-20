@@ -1,0 +1,89 @@
+name: Release IWA
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+      - '[0-9]*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iwa-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate tag
+        id: version
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Tag must be vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build signed bundle
+        env:
+          IWAPLAY_SIGNING_KEY_BASE64: ${{ secrets.IWAPLAY_SIGNING_KEY_BASE64 }}
+          IWA_VERSION: ${{ steps.version.outputs.value }}
+        run: node scripts/build-bundle.js iwaplay.swbn
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          fi
+          if gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | grep -Fxq iwaplay.swbn; then
+            mkdir -p "$RUNNER_TEMP/existing-release"
+            gh release download "$GITHUB_REF_NAME" --pattern iwaplay.swbn --dir "$RUNNER_TEMP/existing-release"
+            cmp iwaplay.swbn "$RUNNER_TEMP/existing-release/iwaplay.swbn" || {
+              echo "Release asset already exists with different contents; refusing to replace it." >&2
+              exit 1
+            }
+          else
+            gh release upload "$GITHUB_REF_NAME" iwaplay.swbn
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-branch
+
+      - name: Update main's update manifest
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          bundle_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/iwaplay.swbn"
+          node scripts/update-manifest.js main-branch/update_manifest.json "$VERSION" "$bundle_url"
+          cd main-branch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add update_manifest.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update IWA manifest for ${VERSION}"
+            git push origin HEAD:main
+          fi
