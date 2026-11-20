@@ -3,6 +3,8 @@
 IWA Play is an Isolated Web App (IWA) for receiving screen and media sharing
 from iOS and macOS devices using AirPlay.
 
+This version is intended for screen sharing/extension and tested only for this feature. Audio or media playback might not work properly.
+
 ## Installation
 
 1. Open `chrome://iwa-dev` in Chrome.
